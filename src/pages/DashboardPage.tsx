@@ -14,13 +14,13 @@ import {
   Lightbulb,
   Clock,
 } from 'lucide-react';
-import { DOMAINS, TOTAL_TOPICS } from '@/lib/curriculum';
+import { DOMAINS } from '@/lib/curriculum';
 import { navigate } from '@/lib/router';
 import { PageHeader } from '@/components/PageHeader';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useQuizHistory } from '@/lib/useQuizHistory';
 import { clearAttempts } from '@/lib/storage';
-import { aggregateStats, formatRelative, type DomainStat } from '@/lib/stats';
+import { aggregateStats, formatRelative } from '@/lib/stats';
 
 const colorMap = {
   primary: { bg: 'bg-primary-50', text: 'text-primary-700', ring: 'ring-primary-200', bar: 'bg-primary-600' },

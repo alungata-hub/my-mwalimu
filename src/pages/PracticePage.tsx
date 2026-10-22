@@ -1,5 +1,20 @@
-import { useMemo, useRef, useState } from 'react';
-import { Brain, RotateCcw, ArrowRight, ArrowLeft, CircleCheck as CheckCircle2, Circle as XCircle, Award, Eye, ListChecks, CircleAlert as AlertCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Brain,
+  RotateCcw,
+  ArrowRight,
+  ArrowLeft,
+  CircleCheck as CheckCircle2,
+  Circle as XCircle,
+  Award,
+  Eye,
+  ListChecks,
+  CircleAlert as AlertCircle,
+  Timer,
+  Clock,
+  Zap,
+  AlertTriangle,
+} from 'lucide-react';
 import { QUESTIONS, type Question } from '@/lib/questions';
 import { getDomainName } from '@/lib/domains';
 import type { DomainId } from '@/lib/domains';
@@ -16,11 +31,15 @@ import { notifyHistoryChanged } from '@/lib/useQuizHistory';
 import { navigate } from '@/lib/router';
 import { PageHeader } from '@/components/PageHeader';
 
-type Phase = 'taking' | 'review' | 'results';
+type Phase = 'start' | 'taking' | 'review' | 'results';
+
+const TIMED_DURATION_SEC = 180; // 3 minutes
 
 export function PracticePage() {
   const questions = useMemo(() => QUESTIONS, []);
-  const [phase, setPhase] = useState<Phase>('taking');
+  const [phase, setPhase] = useState<Phase>('start');
+  const [timed, setTimed] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(TIMED_DURATION_SEC);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -30,9 +49,65 @@ export function PracticePage() {
   const savedRef = useRef(false);
 
   const q = questions[current];
-  const answered = records.some((r) => r.questionId === q.id);
   const progressAnswered = records.length;
   const progressPct = Math.round((progressAnswered / questions.length) * 100);
+
+  // ── Finish quiz: score, save once, go to results ───────────────────
+  const finishQuiz = useCallback(
+    (allRecords: AnswerRecord[]) => {
+      if (savedRef.current) return;
+      savedRef.current = true;
+      const res = scoreQuiz(questions, allRecords);
+      setResult(res);
+      setPhase('results');
+      const attempt = createAttempt(
+        res.scorePercent,
+        res.correct,
+        res.total,
+        res.passed,
+        res.records,
+      );
+      saveAttempt(attempt);
+      notifyHistoryChanged();
+    },
+    [questions],
+  );
+
+  // ── Timer effect (timed mode only) ─────────────────────────────────
+  // Uses a ref for the finish callback so the interval is set up once,
+  // not recreated every second.
+  const finishRef = useRef<(records: AnswerRecord[]) => void>(() => {});
+  finishRef.current = (allRecords: AnswerRecord[]) => finishQuiz(allRecords);
+  const recordsRef = useRef<AnswerRecord[]>(records);
+  recordsRef.current = records;
+
+  useEffect(() => {
+    if (!timed || phase !== 'taking') return;
+    const interval = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          clearInterval(interval);
+          finishRef.current(recordsRef.current);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timed, phase]);
+
+  const startQuiz = (timedMode: boolean) => {
+    savedRef.current = false;
+    setTimed(timedMode);
+    setTimeLeft(TIMED_DURATION_SEC);
+    setCurrent(0);
+    setSelected(null);
+    setSubmitted(false);
+    setRecords([]);
+    setResult(null);
+    setReviewIndex(0);
+    setPhase('taking');
+  };
 
   const choose = (i: number) => {
     if (submitted) return;
@@ -48,22 +123,7 @@ export function PracticePage() {
 
   const nextQuestion = () => {
     if (current + 1 >= questions.length) {
-      const finalRecords = [...records];
-      const res = scoreQuiz(questions, finalRecords);
-      setResult(res);
-      setPhase('results');
-      if (!savedRef.current) {
-        savedRef.current = true;
-        const attempt = createAttempt(
-          res.scorePercent,
-          res.correct,
-          res.total,
-          res.passed,
-          res.records,
-        );
-        saveAttempt(attempt);
-        notifyHistoryChanged();
-      }
+      finishQuiz(records);
       return;
     }
     setCurrent((c) => c + 1);
@@ -81,13 +141,15 @@ export function PracticePage() {
 
   const restart = () => {
     savedRef.current = false;
+    setTimed(false);
+    setTimeLeft(TIMED_DURATION_SEC);
     setCurrent(0);
     setSelected(null);
     setSubmitted(false);
     setRecords([]);
     setResult(null);
     setReviewIndex(0);
-    setPhase('taking');
+    setPhase('start');
   };
 
   const startReview = () => {
@@ -96,14 +158,25 @@ export function PracticePage() {
     setPhase('review');
   };
 
-  // ── Results screen ──────────────────────────────────────────────────
+  // ── Start screen ───────────────────────────────────────────────────
+  if (phase === 'start') {
+    return <StartScreen onStart={startQuiz} />;
+  }
+
+  // ── Results screen ─────────────────────────────────────────────────
   if (phase === 'results' && result) {
     return (
-      <ResultsScreen result={result} onRestart={restart} onReview={startReview} />
+      <ResultsScreen
+        result={result}
+        timed={timed}
+        timeExpired={timed && timeLeft === 0}
+        onRestart={restart}
+        onReview={startReview}
+      />
     );
   }
 
-  // ── Missed-question review ──────────────────────────────────────────
+  // ── Missed-question review ─────────────────────────────────────────
   if (phase === 'review' && result) {
     const missed = result.missed;
     if (missed.length === 0) {
@@ -127,26 +200,41 @@ export function PracticePage() {
     );
   }
 
-  // ── Quiz taking ─────────────────────────────────────────────────────
+  // ── Quiz taking ────────────────────────────────────────────────────
   const isLast = current + 1 >= questions.length;
+  const lowTime = timed && timeLeft <= 30;
 
   return (
     <>
       <PageHeader
-        eyebrow="Practice exam"
-        title="AZ-900 practice quiz"
-        subtitle="15 questions across all three official skill domains. Select an answer, submit, and get instant feedback before moving on."
+        eyebrow={timed ? 'Timed practice' : 'Practice exam'}
+        title={timed ? 'Timed AZ-900 quiz' : 'AZ-900 practice quiz'}
+        subtitle={
+          timed
+            ? `You have ${TIMED_DURATION_SEC / 60} minutes. The quiz auto-submits when time runs out — answer as many as you can.`
+            : '15 questions across all three official skill domains. Select an answer, submit, and get instant feedback before moving on.'
+        }
       />
 
-      {/* Top progress */}
+      {/* Timer + progress */}
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-medium text-ink-500">
           Question {current + 1} of {questions.length}
         </span>
-        <span className="chip bg-primary-50 text-primary-700">
-          <ListChecks className="w-3.5 h-3.5" />
-          {progressAnswered}/{questions.length} answered
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="chip bg-primary-50 text-primary-700">
+            <ListChecks className="w-3.5 h-3.5" />
+            {progressAnswered}/{questions.length} answered
+          </span>
+          {timed && (
+            <span
+              className={`chip ${lowTime ? 'bg-error-50 text-error-700 animate-pulse' : 'bg-ink-100 text-ink-700'}`}
+            >
+              <Timer className="w-3.5 h-3.5" />
+              {formatTime(timeLeft)}
+            </span>
+          )}
+        </div>
       </div>
       <div className="h-1.5 rounded-full bg-ink-100 overflow-hidden mb-6">
         <div
@@ -154,6 +242,14 @@ export function PracticePage() {
           style={{ width: `${progressPct}%` }}
         />
       </div>
+
+      {/* Low-time warning banner */}
+      {timed && lowTime && (
+        <div className="mb-4 p-3 rounded-xl bg-error-50 border border-error-200 flex items-center gap-2 text-sm font-semibold text-error-700">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          Less than 30 seconds remaining — the quiz will auto-submit soon.
+        </div>
+      )}
 
       {/* Question card */}
       <div className="card p-6 mb-4">
@@ -265,11 +361,85 @@ export function PracticePage() {
         )}
       </div>
 
+      {/* Timed mode: early finish button */}
+      {timed && (
+        <div className="mt-4 text-center">
+          <button
+            onClick={() => finishQuiz(records)}
+            className="btn-ghost text-ink-500"
+          >
+            Finish early &amp; see results
+          </button>
+        </div>
+      )}
+
       {/* Footer tip */}
       <div className="mt-8 card p-5 flex items-center gap-4 bg-accent-50 border-accent-100">
         <Brain className="w-8 h-8 text-accent-600 shrink-0" />
         <p className="text-sm text-accent-800">
-          You'll see an explanation for every option after submitting. The pass threshold on the real AZ-900 is 700 (70%).
+          {timed
+            ? 'The quiz auto-submits when the timer reaches zero. Unanswered questions count as incorrect.'
+            : "You'll see an explanation for every option after submitting. The pass threshold on the real AZ-900 is 700 (70%)."}
+        </p>
+      </div>
+    </>
+  );
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ── Start screen ───────────────────────────────────────────────────────
+function StartScreen({ onStart }: { onStart: (timed: boolean) => void }) {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Practice exam"
+        title="AZ-900 practice quiz"
+        subtitle="15 questions across all three official skill domains. Choose your mode below."
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+        <button
+          onClick={() => onStart(false)}
+          className="card card-hover p-6 text-left group"
+        >
+          <span className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary-50 text-primary-700 mb-4">
+            <Clock className="w-6 h-6" />
+          </span>
+          <h3 className="font-bold text-ink-900">Untimed practice</h3>
+          <p className="mt-1.5 text-sm text-ink-600">
+            Answer 15 questions at your own pace. Get instant feedback and explanations after each submission.
+          </p>
+          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary-700 group-hover:gap-2 transition-all">
+            Start practice <ArrowRight className="w-4 h-4" />
+          </span>
+        </button>
+
+        <button
+          onClick={() => onStart(true)}
+          className="card card-hover p-6 text-left group"
+        >
+          <span className="flex items-center justify-center w-12 h-12 rounded-xl bg-secondary-50 text-secondary-700 mb-4">
+            <Zap className="w-6 h-6" />
+          </span>
+          <h3 className="font-bold text-ink-900">Timed challenge</h3>
+          <p className="mt-1.5 text-sm text-ink-600">
+            {TIMED_DURATION_SEC / 60}-minute countdown. The quiz auto-submits when time runs out. Simulates real exam pressure.
+          </p>
+          <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-secondary-700 group-hover:gap-2 transition-all">
+            Start timer <ArrowRight className="w-4 h-4" />
+          </span>
+        </button>
+      </div>
+
+      <div className="mt-8 card p-5 flex items-center gap-4 bg-accent-50 border-accent-100 max-w-2xl">
+        <Brain className="w-8 h-8 text-accent-600 shrink-0" />
+        <p className="text-sm text-accent-800">
+          The pass threshold on the real AZ-900 is 700 (70%). Both modes save your results to your quiz history.
         </p>
       </div>
     </>
@@ -279,10 +449,14 @@ export function PracticePage() {
 // ── Results screen ─────────────────────────────────────────────────────
 function ResultsScreen({
   result,
+  timed,
+  timeExpired,
   onRestart,
   onReview,
 }: {
   result: QuizResult;
+  timed: boolean;
+  timeExpired: boolean;
   onRestart: () => void;
   onReview: () => void;
 }) {
@@ -306,6 +480,13 @@ function ResultsScreen({
             : `Below the ${PASS_THRESHOLD_PERCENT}% threshold. Review the missed questions and try again.`}
         </p>
 
+        {timeExpired && (
+          <div className="mt-4 p-3 rounded-lg bg-secondary-50 border border-secondary-100 flex items-center justify-center gap-2 text-sm font-medium text-secondary-700">
+            <Timer className="w-4 h-4" />
+            Time expired — the quiz was auto-submitted.
+          </div>
+        )}
+
         <div className="mt-6 grid grid-cols-3 gap-3 text-center">
           <Stat label="Correct" value={result.correct} tone="primary" />
           <Stat label="Missed" value={result.missed.length} tone="error" />
@@ -315,7 +496,7 @@ function ResultsScreen({
 
       <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
         <button onClick={onRestart} className="btn-primary">
-          <RotateCcw className="w-4 h-4" /> Retake quiz
+          <RotateCcw className="w-4 h-4" /> {timed ? 'Back to start' : 'Retake quiz'}
         </button>
         {result.missed.length > 0 && (
           <button onClick={onReview} className="btn-secondary">
