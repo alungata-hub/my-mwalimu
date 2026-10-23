@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "node --experimental-strip-types --no-warnings scripts/quiz.test.ts",
     "test:history": "node --experimental-strip-types --no-warnings scripts/history.test.ts",
-    "test:all": "node --experimental-strip-types --no-warnings scripts/quiz.test.ts && node --experimental-strip-types --no-warnings scripts/history.test.ts && node --experimental-strip-types --no-warnings scripts/flashcards.test.ts"
+    "test:timer": "node --experimental-strip-types --no-warnings scripts/timer.test.ts",
+    "test:all": "node --experimental-strip-types --no-warnings scripts/quiz.test.ts && node --experimental-strip-types --no-warnings scripts/history.test.ts && node --experimental-strip-types --no-warnings scripts/flashcards.test.ts && node --experimental-strip-types --no-warnings scripts/timer.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
