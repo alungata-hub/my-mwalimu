@@ -12,6 +12,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { supabaseConfigured } from '@/lib/supabase';
 
 type Mode = 'signin' | 'signup';
 
@@ -169,6 +170,12 @@ export function AuthPage() {
               {error && (
                 <div className="p-3 rounded-lg bg-error-50 border border-error-200 text-sm text-error-700 animate-fade-in">
                   {error}
+                </div>
+              )}
+
+              {!supabaseConfigured && (
+                <div className="p-3 rounded-lg bg-secondary-50 border border-secondary-100 text-sm text-secondary-700 animate-fade-in">
+                  Authentication is not configured. Sign in and sign up will not work until the project environment variables are set.
                 </div>
               )}
 
