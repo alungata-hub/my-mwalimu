@@ -66,9 +66,9 @@ export function PracticePage() {
         res.total,
         res.passed,
         res.records,
+        timed,
       );
-      saveAttempt(attempt);
-      notifyHistoryChanged();
+      saveAttempt(attempt).then(() => notifyHistoryChanged());
     },
     [questions],
   );

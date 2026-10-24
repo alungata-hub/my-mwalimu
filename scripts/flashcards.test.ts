@@ -27,7 +27,7 @@ function section(name: string): void {
 }
 
 // Start clean
-clearReviews();
+await clearReviews();
 
 section('Flashcard data integrity');
 {
@@ -46,13 +46,13 @@ section('Flashcard data integrity');
 
 section('Review storage round-trip');
 {
-  clearReviews();
-  check('loadReviews empty after clear', Object.keys(loadReviews()).length === 0);
-  const updated = saveReview(FLASHCARDS[0].id, 'known');
+  await clearReviews();
+  check('loadReviews empty after clear', Object.keys(await loadReviews()).length === 0);
+  const updated = await saveReview(FLASHCARDS[0].id, 'known');
   check('saveReview returns object with entry', updated[FLASHCARDS[0].id] !== undefined);
   check('saved rating is "known"', updated[FLASHCARDS[0].id].rating === 'known');
 
-  const loaded = loadReviews();
+  const loaded = await loadReviews();
   check('loadReviews returns saved rating', loaded[FLASHCARDS[0].id]?.rating === 'known');
   check('getReview returns "known"', getReview(loaded, FLASHCARDS[0].id) === 'known');
   check('getReview returns "unrated" for unreviewed', getReview(loaded, 'nonexistent') === 'unrated');
@@ -60,10 +60,10 @@ section('Review storage round-trip');
 
 section('Review storage — multiple ratings');
 {
-  clearReviews();
-  saveReview(FLASHCARDS[0].id, 'known');
-  saveReview(FLASHCARDS[1].id, 'needs-revision');
-  const loaded = loadReviews();
+  await clearReviews();
+  await saveReview(FLASHCARDS[0].id, 'known');
+  await saveReview(FLASHCARDS[1].id, 'needs-revision');
+  const loaded = await loadReviews();
   check('Two reviews stored', Object.keys(loaded).length === 2);
   check('Card 0 is known', getReview(loaded, FLASHCARDS[0].id) === 'known');
   check('Card 1 is needs-revision', getReview(loaded, FLASHCARDS[1].id) === 'needs-revision');
@@ -71,10 +71,10 @@ section('Review storage — multiple ratings');
 
 section('Review storage — overwrite rating');
 {
-  clearReviews();
-  saveReview(FLASHCARDS[0].id, 'needs-revision');
-  saveReview(FLASHCARDS[0].id, 'known');
-  const loaded = loadReviews();
+  await clearReviews();
+  await saveReview(FLASHCARDS[0].id, 'needs-revision');
+  await saveReview(FLASHCARDS[0].id, 'known');
+  const loaded = await loadReviews();
   check('Only one entry for the card', Object.keys(loaded).length === 1);
   check('Rating updated to "known"', getReview(loaded, FLASHCARDS[0].id) === 'known');
 }
@@ -83,16 +83,16 @@ section('Review storage — corrupt data resilience');
 {
   // @ts-expect-error — intentionally writing garbage
   window.localStorage.setItem('mwalimu:flashcard-reviews', 'not-json');
-  const loaded = loadReviews();
+  const loaded = await loadReviews();
   check('Corrupt JSON returns empty object', typeof loaded === 'object' && Object.keys(loaded).length === 0);
 }
 
 section('clearReviews wipes storage');
 {
-  saveReview(FLASHCARDS[0].id, 'known');
-  check('has 1 review before clear', Object.keys(loadReviews()).length === 1);
-  clearReviews();
-  check('0 reviews after clear', Object.keys(loadReviews()).length === 0);
+  await saveReview(FLASHCARDS[0].id, 'known');
+  check('has 1 review before clear', Object.keys(await loadReviews()).length === 1);
+  await clearReviews();
+  check('0 reviews after clear', Object.keys(await loadReviews()).length === 0);
 }
 
 section('CardRating type values');

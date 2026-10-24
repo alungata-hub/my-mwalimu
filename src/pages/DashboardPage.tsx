@@ -35,8 +35,7 @@ export function DashboardPage() {
   const hasHistory = stats.attemptCount > 0;
 
   const handleReset = () => {
-    clearAttempts();
-    refresh();
+    clearAttempts().then(() => refresh());
     setConfirmReset(false);
   };
 

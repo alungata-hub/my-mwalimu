@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Filter, Layers, Eye, EyeOff } from 'lucide-react';
 import { FLASHCARDS, type Flashcard } from '@/lib/flashcards';
 import { getDomainName } from '@/lib/domains';
@@ -17,10 +17,14 @@ import { PageHeader } from '@/components/PageHeader';
 type FilterMode = 'all' | 'needs-revision' | 'unrated';
 
 export function FlashcardsPage() {
-  const [reviews, setReviews] = useState<Record<string, FlashcardReview>>(() => loadReviews());
+  const [reviews, setReviews] = useState<Record<string, FlashcardReview>>({});
   const [filter, setFilter] = useState<FilterMode>('all');
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+
+  useEffect(() => {
+    loadReviews().then(setReviews).catch(() => setReviews({}));
+  }, []);
 
   const allCards = useMemo(() => FLASHCARDS, []);
 
@@ -57,8 +61,8 @@ export function FlashcardsPage() {
   };
 
   const handleRate = (cardId: string, rating: CardRating) => {
-    const updated = saveReview(cardId, rating);
-    setReviews({ ...updated });
+    setReviews((prev) => ({ ...prev, [cardId]: { cardId, rating, reviewedAt: Date.now() } }));
+    saveReview(cardId, rating).then(setReviews).catch(() => {});
   };
 
   const changeFilter = (mode: FilterMode) => {
@@ -68,7 +72,7 @@ export function FlashcardsPage() {
   };
 
   const handleReset = () => {
-    clearReviews();
+    clearReviews().catch(() => {});
     setReviews({});
     setFilter('all');
     setIndex(0);

@@ -1,6 +1,5 @@
+import { supabase, supabaseConfigured } from './supabase.ts';
 import type { AnswerRecord } from './scoring.ts';
-import type { DomainId } from './domains.ts';
-import { isDomainId } from './domains.ts';
 
 export interface AttemptRecord {
   id: string;
@@ -9,8 +8,11 @@ export interface AttemptRecord {
   correct: number;
   total: number;
   passed: boolean;
+  timed: boolean;
   answers: AnswerRecord[];
 }
+
+// ── localStorage fallback (used by tests and when Supabase is not configured) ──
 
 const STORAGE_KEY = 'mwalimu:quiz-history';
 const STORAGE_VERSION = 1;
@@ -20,7 +22,7 @@ interface StoredEnvelope {
   attempts: AttemptRecord[];
 }
 
-export function loadAttempts(): AttemptRecord[] {
+function loadAttemptsLocal(): AttemptRecord[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -35,9 +37,9 @@ export function loadAttempts(): AttemptRecord[] {
   }
 }
 
-export function saveAttempt(attempt: AttemptRecord): AttemptRecord[] {
+function saveAttemptLocal(attempt: AttemptRecord): AttemptRecord[] {
   if (typeof window === 'undefined') return [];
-  const existing = loadAttempts();
+  const existing = loadAttemptsLocal();
   const next = [...existing, attempt];
   const envelope: StoredEnvelope = { version: STORAGE_VERSION, attempts: next };
   try {
@@ -48,12 +50,88 @@ export function saveAttempt(attempt: AttemptRecord): AttemptRecord[] {
   return next;
 }
 
-export function clearAttempts(): void {
+function clearAttemptsLocal(): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
   } catch {
     // no-op
+  }
+}
+
+// ── Supabase-backed functions ─────────────────────────────────────────────
+
+interface DbAttempt {
+  id: string;
+  score_percent: number;
+  correct: number;
+  total: number;
+  passed: boolean;
+  timed: boolean;
+  answers: AnswerRecord[];
+  completed_at: string;
+}
+
+function dbToAttempt(row: DbAttempt): AttemptRecord {
+  return {
+    id: row.id,
+    completedAt: new Date(row.completed_at).getTime(),
+    scorePercent: row.score_percent,
+    correct: row.correct,
+    total: row.total,
+    passed: row.passed,
+    timed: row.timed ?? false,
+    answers: Array.isArray(row.answers) ? row.answers : [],
+  };
+}
+
+export async function loadAttempts(): Promise<AttemptRecord[]> {
+  if (!supabaseConfigured) return loadAttemptsLocal();
+
+  const { data, error } = await supabase
+    .from('quiz_attempts')
+    .select('id, score_percent, correct, total, passed, timed, answers, completed_at')
+    .order('completed_at', { ascending: false });
+
+  if (error) {
+    console.warn('Failed to load attempts from Supabase, falling back to localStorage:', error.message);
+    return loadAttemptsLocal();
+  }
+
+  return (data ?? []).map(dbToAttempt);
+}
+
+export async function saveAttempt(attempt: AttemptRecord): Promise<AttemptRecord[]> {
+  if (!supabaseConfigured) return saveAttemptLocal(attempt);
+
+  const { error } = await supabase.from('quiz_attempts').insert({
+    score_percent: attempt.scorePercent,
+    correct: attempt.correct,
+    total: attempt.total,
+    passed: attempt.passed,
+    timed: attempt.timed ?? false,
+    answers: attempt.answers,
+  });
+
+  if (error) {
+    console.warn('Failed to save attempt to Supabase, falling back to localStorage:', error.message);
+    return saveAttemptLocal(attempt);
+  }
+
+  return loadAttempts();
+}
+
+export async function clearAttempts(): Promise<void> {
+  if (!supabaseConfigured) {
+    clearAttemptsLocal();
+    return;
+  }
+
+  const { error } = await supabase.from('quiz_attempts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+  if (error) {
+    console.warn('Failed to clear attempts in Supabase:', error.message);
+    clearAttemptsLocal();
   }
 }
 
@@ -63,6 +141,7 @@ export function createAttempt(
   total: number,
   passed: boolean,
   answers: AnswerRecord[],
+  timed: boolean = false,
 ): AttemptRecord {
   return {
     id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -71,9 +150,12 @@ export function createAttempt(
     correct,
     total,
     passed,
+    timed,
     answers,
   };
 }
+
+// ── validation helpers ────────────────────────────────────────────────────
 
 function migrateEnvelope(parsed: unknown): AttemptRecord[] {
   if (parsed && typeof parsed === 'object') {
